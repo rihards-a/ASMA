@@ -79,8 +79,7 @@ def operator_required(view):
 @bp.route("/")
 @login_required
 def index():
-    # TODO: return redirect(url_for("targets.search"))
-    return render_template("password.html")
+    return redirect(url_for("targets.search"))
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():

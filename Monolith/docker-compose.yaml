@@ -1,0 +1,15 @@
+services:
+  asma:
+    build: .
+    # restart on crashes and docker daemon restarts.
+    restart: unless-stopped 
+    # Scanner API keys and ASMA_SECRET_KEY.
+    env_file: .env
+    ports:
+      # Loopback only. Change or add an address to publish on another interface.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Database and artifacts. The container runs as UID 10001, which needs rwX here.
+      - ./data:/data
+    # No added capabilities: nmap runs unprivileged, so only scans without raw
+    # sockets work (TCP connect -sT, version detection -sV; not -sS or -O).

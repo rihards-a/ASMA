@@ -22,6 +22,8 @@ sys.path.insert(0, str(PACKAGE_DIR.parent))
 app_package = importlib.import_module(PACKAGE_DIR.name)
 # Lloaded here for the tests that use it directly.
 validation = importlib.import_module(PACKAGE_DIR.name + ".validation")
+scanners = importlib.import_module(PACKAGE_DIR.name + ".scanners")
+adapters = importlib.import_module(PACKAGE_DIR.name + ".adapters")
 
 PASSWORD = "correct horse battery"
 # Hashing is deliberately slow, so the shared password is hashed only once.
@@ -35,6 +37,8 @@ LONG_AGO = "2026-01-01T00:00:00Z"
 # Fixtures (reusable setup code for tests)
 # ---------------------------------------------------------------------------
 
+# tmp_path is a temporary directory created by pytest. 
+# monkeypatch is a pytest fixture that allows you to modify environment variables and other settings for the duration of a test.
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     """Application on an empty data directory. The first-start operator

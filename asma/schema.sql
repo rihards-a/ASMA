@@ -1,4 +1,4 @@
--- Migration 001: initial schema. Requires SQLite 3.38 or newer (STRICT, json_type).
+-- Database schema. Requires SQLite 3.38 or newer (STRICT, json_type).
 -- Times are TEXT in UTC, format YYYY-MM-DDTHH:MM:SSZ. Booleans are INTEGER 0 or 1.
 --
 -- ===========================================================================
@@ -74,8 +74,8 @@
 --
 -- PRAGMA user_version
 --   A number stored in the database file that the application uses as the
---   schema version. Migration N sets it to N; at start-up, migrations newer
---   than the stored number are applied in order.
+--   schema version. This file sets it to 1; at start-up the application runs
+--   this file only when the stored number is 0 (a new, empty database).
 --
 
 -- Only affects the connection running this file, and inside a transaction

@@ -1,4 +1,4 @@
-"""The scanners, one module each; scanners.py describes what a module defines.
+"""The scanners, one module each; common.py describes what a module defines.
 
 Adding a scanner: a new module here and one line in SCANNERS.
 """

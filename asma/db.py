@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import current_app, g, has_request_context, request
 from werkzeug.security import generate_password_hash
 
-SCHEMA = Path(__file__).with_name("InitialSchema.sql")
+SCHEMA = Path(__file__).with_name("schema.sql")
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 

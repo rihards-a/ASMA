@@ -19,12 +19,12 @@ import httpx
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template,
                    request, send_from_directory, url_for)
 
-from . import scanners, validation
-from .adapters import SCANNERS
+from . import validation
 from .apikeys import api_key_required
 from .auth import login_required, operator_required
 from .db import audit, connect, get_db, now
-from .targets import json_error
+from .scanners import SCANNERS
+from .scanners.common import Cancelled, ScanError, details_json
 
 bp = Blueprint("jobs", __name__)
 api = Blueprint("jobs_api", __name__, url_prefix="/api")
@@ -174,16 +174,16 @@ def run_job(app, job_id):
         def checkpoint():
             row = conn.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
             if row is None or row["status"] != "running":
-                raise scanners.Cancelled
+                raise Cancelled
 
         try:
             findings, raw = scanner.run(job["value"], app.config[scanner.API_KEY], checkpoint)
             complete(app, conn, job_id, name, findings, raw)
-        except scanners.Cancelled:
+        except Cancelled:
             return
         except Exception as exc:
             conn.rollback()
-            if not isinstance(exc, (scanners.ScanError, httpx.HTTPError)):
+            if not isinstance(exc, (ScanError, httpx.HTTPError)):
                 app.logger.exception("Job %s failed", job_id)
             conn.execute("UPDATE jobs SET status = 'failed', finished_at = ?, error = ? "
                          "WHERE job_id = ? AND status = 'running'",
@@ -217,7 +217,7 @@ def complete(app, conn, job_id, name, findings, raw):
         return
     conn.executemany("INSERT INTO findings (job_id, scanner, finding_key, details) "
                      "VALUES (?, ?, ?, ?)",
-                     [(job_id, name, key, scanners.details_json(details))
+                     [(job_id, name, key, details_json(details))
                       for key, details in findings.items()])
     if raw:
         conn.execute("INSERT INTO artifacts (job_id, name, rel_path, media_type, size_bytes, "
@@ -230,7 +230,7 @@ def complete(app, conn, job_id, name, findings, raw):
 def error_text(name, exc):
     """The failure as shown to the user. The texts of httpx exceptions are not
     used: they can contain the request URL, and Shodan's URL carries the API key."""
-    if isinstance(exc, scanners.ScanError):
+    if isinstance(exc, ScanError):
         return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):
         return (f"The {name} API answered HTTP {exc.response.status_code} "
@@ -322,13 +322,7 @@ def api_search():
 @api.route("/jobs", methods=["POST"])
 @api_key_required(write=True)
 def api_create():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return json_error("The body must be a JSON object.", 400)
-    try:
-        job_id = create_job(data)
-    except validation.InputError as exc:
-        return json_error(exc.message, exc.status)
+    job_id = create_job(validation.json_object(request.get_json(silent=True)))
     return jsonify(job_json(get_job(job_id))), 201
 
 
@@ -336,9 +330,7 @@ def api_create():
 @api_key_required()
 def api_view(job_id):
     """The job with its findings (details as objects)."""
-    job = get_job(job_id)
-    if job is None:
-        return json_error("Job not found.", 404)
+    job = get_job(job_id) or abort(404, "Job not found.")
     findings = [{"finding_key": f["finding_key"], "details": json.loads(f["details"])}
                 for f in get_findings(job_id)]
     return jsonify({**job_json(job), "findings": findings})
@@ -347,11 +339,5 @@ def api_view(job_id):
 @api.route("/jobs/<int:job_id>/cancel", methods=["POST"])
 @api_key_required(write=True)
 def api_cancel(job_id):
-    job = get_job(job_id)
-    if job is None:
-        return json_error("Job not found.", 404)
-    try:
-        cancel_job(job)
-    except validation.InputError as exc:
-        return json_error(exc.message, exc.status)
+    cancel_job(get_job(job_id) or abort(404, "Job not found."))
     return jsonify(job_json(get_job(job_id)))

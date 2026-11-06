@@ -1,7 +1,7 @@
 """Input checks in validation.py. Pure functions: no application needed."""
 import pytest
 
-from conftest import validation
+from asma import validation
 
 
 def rejects(func, *args):

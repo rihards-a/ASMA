@@ -4,26 +4,15 @@ Every test gets a fresh application with its own database in a temporary
 directory. Test users are inserted directly with one known password, so the
 tests do not depend on the temporary password printed at first start.
 
-Run from the project folder:  python -m pytest tests / uv run --with pytest python -m pytest tests
+Run from the project folder: (pytest.ini puts the test folder on the path)
 """
 import hashlib
-import importlib
 import sqlite3
-import sys
-from pathlib import Path
 
 import pytest
 from werkzeug.security import generate_password_hash
 
-# The application package is the folder that contains tests/. It is imported
-# by its folder name, so the tests work wherever the project is checked out.
-PACKAGE_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PACKAGE_DIR.parent))
-app_package = importlib.import_module(PACKAGE_DIR.name)
-# Lloaded here for the tests that use it directly.
-validation = importlib.import_module(PACKAGE_DIR.name + ".validation")
-scanners = importlib.import_module(PACKAGE_DIR.name + ".scanners")
-adapters = importlib.import_module(PACKAGE_DIR.name + ".adapters")
+import asma
 
 PASSWORD = "correct horse battery"
 # Hashing is deliberately slow, so the shared password is hashed only once.
@@ -44,7 +33,7 @@ def app(tmp_path, monkeypatch):
     """Application on an empty data directory. The first-start operator
     "admin" (user_id 1) gets PASSWORD and needs no password change."""
     monkeypatch.setenv("ASMA_DATA_DIR", str(tmp_path))
-    application = app_package.create_app()
+    application = asma.create_app()
     application.config["TESTING"] = True
     conn = connect(application)
     conn.execute("UPDATE users SET password_hash = ?, must_change_password = 0, "

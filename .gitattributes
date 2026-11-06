@@ -1,0 +1,3 @@
+# LF everywhere because the files run in a Linux container.
+# It is safe to use * as there are no binary files in this repo.
+* text=auto eol=lf

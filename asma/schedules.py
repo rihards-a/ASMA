@@ -19,11 +19,10 @@ from flask import (Blueprint, abort, current_app, flash, g, jsonify, redirect, r
                    request, url_for)
 
 from . import jobs, validation
-from .adapters import SCANNERS
 from .apikeys import api_key_required
 from .auth import login_required, operator_required
 from .db import TIME_FORMAT, audit, connect, get_db, now
-from .targets import json_error
+from .scanners import SCANNERS
 
 bp = Blueprint("schedules", __name__)
 api = Blueprint("schedules_api", __name__, url_prefix="/api")
@@ -272,13 +271,7 @@ def api_search():
 @api.route("/schedules", methods=["POST"])
 @api_key_required(write=True)
 def api_create():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return json_error("The body must be a JSON object.", 400)
-    try:
-        schedule_id = create_schedule(data)
-    except validation.InputError as exc:
-        return json_error(exc.message, exc.status)
+    schedule_id = create_schedule(validation.json_object(request.get_json(silent=True)))
     return jsonify(get_schedule(schedule_id)), 201
 
 
@@ -286,20 +279,17 @@ def api_create():
 @api_key_required()
 def api_view(schedule_id):
     schedule = get_schedule(schedule_id)
-    return jsonify(schedule) if schedule else json_error("Schedule not found.", 404)
-
+    return jsonify(get_schedule(schedule_id) or abort(404, "Schedule not found."))
+ 
 
 @api.route("/schedules/<int:schedule_id>", methods=["PATCH"])
 @api_key_required(write=True)
 def api_edit(schedule_id):
     """Pause or resume: the body is {"enabled": true or false}."""
-    schedule = get_schedule(schedule_id)
-    if schedule is None:
-        return json_error("Schedule not found.", 404)
+    schedule = get_schedule(schedule_id) or abort(404, "Schedule not found.")
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or set(data) != {"enabled"}:
-        return json_error("The body must be {\"enabled\": true or false}; nothing else "
-                          "can be changed.", 400)
+        raise validation.InputError("The body must be {\"enabled\": true or false}.")
     set_enabled(schedule, data["enabled"])
     return jsonify(get_schedule(schedule_id))
 
@@ -307,8 +297,5 @@ def api_edit(schedule_id):
 @api.route("/schedules/<int:schedule_id>", methods=["DELETE"])
 @api_key_required(write=True)
 def api_delete(schedule_id):
-    schedule = get_schedule(schedule_id)
-    if schedule is None:
-        return json_error("Schedule not found.", 404)
-    delete_schedule(schedule)
+    delete_schedule(get_schedule(schedule_id) or abort(404, "Schedule not found."))
     return "", 204

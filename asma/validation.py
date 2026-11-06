@@ -30,6 +30,13 @@ def text(value, name, max_len, required=True):
     return value
 
 
+def json_object(value):
+    """A parsed JSON request body, which must be an object."""
+    if not isinstance(value, dict):
+        raise InputError("The body must be a JSON object.")
+    return value
+
+
 def flag(value):
     """Boolean as 0 or 1."""
     if isinstance(value, bool):

@@ -42,18 +42,19 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn==26.2.0
 
-# The package keeps its folder name. The code stays owned by root, so the
-# application cannot modify it, but can read and execute it.
-COPY . Monolith/
-RUN chmod -R a+rX Monolith
+# Only the package is copied: .env, data/ and tests/ stay out of the image.
+# The code stays owned by root, so the application can read and execute it,
+# but not modify it.
+COPY asma/ asma/
+RUN chmod -R a+rX asma
 
 # Database and job artifacts (db.py and jobs.py write under ASMA_DATA_DIR).
 ENV ASMA_DATA_DIR=/data
-RUN mkdir /data && chown asma:asma /data
+RUN mkdir -p /data && chown asma:asma /data
 
 USER asma
 EXPOSE 8000
 
 # Exactly one worker: the job queues live in the worker's memory, and every
 # worker start marks unfinished jobs as interrupted. Threads serve parallel requests.
-CMD ["gunicorn", "--workers", "1", "--threads", "8", "--bind", "0.0.0.0:8000", "Monolith:create_app()"]
+CMD ["gunicorn", "--workers", "1", "--threads", "8", "--bind", "0.0.0.0:8000", "asma:create_app()"]

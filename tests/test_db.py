@@ -3,14 +3,15 @@ import sqlite3
 
 import pytest
 
-from conftest import app_package, audit_events, connect, login
+import asma
+from conftest import audit_events, connect, login
 
 
 # monkeypatch is from pytest to temporarily change the env variable, without affecting other tests.
 def test_first_start_creates_schema_and_admin(tmp_path, monkeypatch, capsys):
     # This tests avoids using the app and db fixtures, to check the printed temporary password.
     monkeypatch.setenv("ASMA_DATA_DIR", str(tmp_path))
-    app = app_package.create_app()
+    app = asma.create_app()
     temporary_password = capsys.readouterr().out.split("temporary password:")[1].split()[0]
 
     db = connect(app)
@@ -29,7 +30,7 @@ def test_first_start_creates_schema_and_admin(tmp_path, monkeypatch, capsys):
 
 def test_restart_keeps_existing_database(app, capsys):
     capsys.readouterr()
-    app_package.create_app()  # same ASMA_DATA_DIR as the app fixture
+    asma.create_app()  # same ASMA_DATA_DIR as the app fixture
     assert "temporary password" not in capsys.readouterr().out
     db = connect(app)
     assert db.execute("SELECT count(*) FROM users").fetchone()[0] == 1
@@ -39,6 +40,6 @@ def test_restart_keeps_existing_database(app, capsys):
 def test_application_connections_enforce_foreign_keys(app):
     with app.app_context():
         with pytest.raises(sqlite3.IntegrityError):
-            app_package.db.get_db().execute(
+            asma.db.get_db().execute(
                 "INSERT INTO targets (kind, value, label, created_by_user_id, created_at, "
                 "updated_at) VALUES ('domain', 'example.com', 'x', 999, '', '')")

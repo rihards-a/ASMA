@@ -203,14 +203,6 @@ def delete(target_id):
 # REST API (JSON, X-API-Key)
 # ---------------------------------------------------------------------------
 
-def json_error(message, status):
-    return jsonify(error=message), status
-
-
-@api.route("/health")
-def health():
-    return {"status": "ok"}
-
 
 @api.route("/targets")
 @api_key_required()
@@ -222,44 +214,26 @@ def api_search():
 @api.route("/targets", methods=["POST"])
 @api_key_required(write=True)
 def api_create():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return json_error("The body must be a JSON object.", 400)
-    try:
-        target_id = create_target(data)
-    except validation.InputError as exc:
-        return json_error(exc.message, exc.status)
+    target_id = create_target(validation.json_object(request.get_json(silent=True)))
     return jsonify(get_target(target_id)), 201
 
 
 @api.route("/targets/<int:target_id>")
 @api_key_required()
 def api_view(target_id):
-    target = get_target(target_id)
-    return jsonify(target) if target else json_error("Target not found.", 404)
+    return jsonify(get_target(target_id) or abort(404, "Target not found."))
 
 
 @api.route("/targets/<int:target_id>", methods=["PATCH"])
 @api_key_required(write=True)
 def api_edit(target_id):
-    target = get_target(target_id)
-    if target is None:
-        return json_error("Target not found.", 404)
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return json_error("The body must be a JSON object.", 400)
-    try:
-        update_target(target, data)
-    except validation.InputError as exc:
-        return json_error(exc.message, exc.status)
+    target = get_target(target_id) or abort(404, "Target not found.")
+    update_target(target, validation.json_object(request.get_json(silent=True)))
     return jsonify(get_target(target_id))
 
 
 @api.route("/targets/<int:target_id>", methods=["DELETE"])
 @api_key_required(write=True)
 def api_delete(target_id):
-    target = get_target(target_id)
-    if target is None:
-        return json_error("Target not found.", 404)
-    delete_target(target)
+    delete_target(get_target(target_id) or abort(404, "Target not found."))
     return "", 204

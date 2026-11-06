@@ -1,6 +1,6 @@
 """Shared helpers for the scanners, and the contract every scanner follows.
 
-Each scanner is one module in adapters/ and is listed in adapters.SCANNERS.
+Each scanner is one module in this package and is listed in SCANNERS (__init__.py).
 A scanner module defines:
   TARGET_KIND  the kind of target it scans (keyword, domain or network);
   API_KEY      configuration key holding the external service's API key;
@@ -13,8 +13,8 @@ A scanner module defines:
     findings    {finding_key: details}, keys normalised by finding_key();
     raw         the service's responses as bytes, kept as the job's artifact.
 
-Scanner modules call the helpers through the module (scanners.client()), so
-later the tests can replace them. Failures are raised as exceptions; the job 
+Scanner modules call the helpers through the module (common.client()), so
+the tests can replace them. Failures are raised as exceptions; the job 
 runner (jobs.py) turns them into the job's error.
 """
 import json

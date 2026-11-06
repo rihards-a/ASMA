@@ -14,7 +14,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from conftest import adapters, add_api_key, add_target, app_package, audit_events, post, scanners
+import asma
+from asma.scanners import SCANNERS, common
+from conftest import add_api_key, add_target, audit_events, post
 
 
 # ---------------------------------------------------------------------------
@@ -46,8 +48,8 @@ def no_network():
 def queue(app, monkeypatch):
     """For every test: the fake queue, an API key for every scanner, and no
     HTTP client, so a scanner that was not faked fails its job."""
-    app.config.update({module.API_KEY: "test-key" for module in adapters.SCANNERS.values()})
-    monkeypatch.setattr(scanners, "client", no_network) # this only replaces the client in the scanners module, not conftest
+    app.config.update({module.API_KEY: "test-key" for module in SCANNERS.values()})
+    monkeypatch.setattr(common, "client", no_network) # this only replaces the client in the scanners module, not conftest
     fake = Queue() # the queue is shared
     # Updates the app's extensions to use the fake queue for all scanners.
     app.extensions["asma_queues"] = dict.fromkeys(app.extensions["asma_queues"], fake)
@@ -62,7 +64,7 @@ def headers(db):
 
 def fake_scanner(monkeypatch, name, run):
     """Jobs of scanner name call run(value, api_key, checkpoint) instead of the real scan."""
-    monkeypatch.setattr(adapters.SCANNERS[name], "run", run)
+    monkeypatch.setattr(SCANNERS[name], "run", run)
 
 
 def start(client, headers, target_id, scanner):
@@ -141,7 +143,7 @@ def test_cancel_running_job(app, client, db, headers, queue, monkeypatch):
     def run(keyword, api_key, checkpoint):
         checkpoint()  # still running: passes
         client.post("/api/jobs/1/cancel", headers=headers)  # an operator cancels meanwhile
-        with pytest.raises(scanners.Cancelled):
+        with pytest.raises(common.Cancelled):
             checkpoint() # raises Cancelled, which the scanner adapter expects
         return {"examp1e.com": {}}, b"raw"  # as if the scan had finished anyway
     fake_scanner(monkeypatch, "opensquat", run)
@@ -156,7 +158,7 @@ def test_restart_interrupts_unfinished_jobs(client, db, headers):
     start(client, headers, add_target(db, "keyword", "example"), "opensquat")
     start(client, headers, add_target(db, "domain", "example.com"), "hibs")
     db.execute("UPDATE jobs SET status = 'running' WHERE job_id = 2")  # as if its scan had begun
-    app_package.create_app()  # starts again on the same data directory
+    asma.create_app()  # starts again on the same data directory
     rows = db.execute("SELECT status, finished_at, error FROM jobs").fetchall()
     assert [r["status"] for r in rows] == ["interrupted", "interrupted"]
     assert all(r["finished_at"] and r["error"] for r in rows)

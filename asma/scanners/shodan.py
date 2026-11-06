@@ -8,7 +8,7 @@ import ipaddress
 import json
 import time
 
-from .. import scanners
+from . import common
 
 TARGET_KIND = "network"
 API_KEY = "SHODAN_API_KEY"
@@ -27,7 +27,7 @@ def run(network, api_key, checkpoint):
         block = ipaddress.IPv4Network(network)
         first, last = int(block.network_address), int(block.broadcast_address)
     findings, raw = {}, {}
-    with scanners.client() as http:
+    with common.client() as http:
         for number in range(first, last + 1):
             checkpoint()
             ip = str(ipaddress.IPv4Address(number))
@@ -36,7 +36,7 @@ def run(network, api_key, checkpoint):
             # 404 means Shodan has no information on the address.
             if response.status_code != 404:
                 response.raise_for_status() # 4xx and 5xx are failures.
-                host = raw[ip] = scanners.json_body(response, "Shodan")
+                host = raw[ip] = common.json_body(response, "Shodan")
                 # Sorted, so the same services always give the same details.
                 ports = sorted((int(item.get("port") or 0), str(item.get("transport") or ""),
                                 str(item.get("data") or ""))

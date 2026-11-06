@@ -9,9 +9,10 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, request
+from werkzeug.exceptions import HTTPException
 
-from . import db
+from . import db, auth, apikeys, users, targets, jobs, schedules, validation
 
 # Load environment variables from a .env file if it exists
 load_dotenv() 
@@ -37,9 +38,8 @@ def create_app():
     )
     db.init_app(app)
     
-    from . import auth, apikeys, users, targets, jobs, schedules
     jobs.init_app(app) # update jobs that were interrupted
-    schedules.init_app(app) # 
+    schedules.init_app(app) # start scheduler thread
     app.register_blueprint(auth.bp)
     app.register_blueprint(apikeys.bp)
     app.register_blueprint(users.bp)
@@ -49,5 +49,23 @@ def create_app():
     app.register_blueprint(jobs.api)
     app.register_blueprint(schedules.bp)
     app.register_blueprint(schedules.api)
+
+    @app.route("/api/health")
+    def health():
+        return {"status": "ok"}
+
+    # Web routes catch InputError and flash it; an uncaught one comes from an
+    # API route and is answered as JSON, with its status (400 or 409).
+    @app.errorhandler(validation.InputError)
+    def input_error(exc):
+        return {"error": exc.message}, exc.status
+
+    # abort() in an API route (e.g. 404 "Job not found.") and unknown /api URLs
+    # answer JSON; web pages keep Flask's HTML error pages.
+    @app.errorhandler(HTTPException)
+    def http_error(exc):
+        if request.path.startswith("/api/"):
+            return {"error": exc.description}, exc.code
+        return exc
 
     return app

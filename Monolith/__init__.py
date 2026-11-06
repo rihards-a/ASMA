@@ -37,8 +37,9 @@ def create_app():
     )
     db.init_app(app)
     
-    from . import auth, apikeys, users, targets, jobs
-    jobs.init_app(app)
+    from . import auth, apikeys, users, targets, jobs, schedules
+    jobs.init_app(app) # update jobs that were interrupted
+    schedules.init_app(app) # 
     app.register_blueprint(auth.bp)
     app.register_blueprint(apikeys.bp)
     app.register_blueprint(users.bp)
@@ -46,5 +47,7 @@ def create_app():
     app.register_blueprint(targets.api)
     app.register_blueprint(jobs.bp)
     app.register_blueprint(jobs.api)
+    app.register_blueprint(schedules.bp)
+    app.register_blueprint(schedules.api)
 
     return app

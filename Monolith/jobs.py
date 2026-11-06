@@ -71,8 +71,9 @@ def get_findings(job_id):
                             (job_id,)).fetchall()
 
 
-def create_job(data):
-    """Validate and queue a job; returns its ID. data: target_id, scanner."""
+def scanner_and_target(data):
+    """The scanner name and the target row named in data, checked to fit each
+    other. Shared by jobs and schedules. data: target_id, scanner."""
     name = data.get("scanner")
     if not isinstance(name, str) or name not in SCANNERS:
         raise validation.InputError("Scanner must be one of: " + ", ".join(SCANNERS) + ".")
@@ -88,29 +89,48 @@ def create_job(data):
         raise validation.InputError("The target does not exist.")
     if target["kind"] != scanner.TARGET_KIND:
         raise validation.InputError(f"The {name} scanner only scans {scanner.TARGET_KIND} targets.")
+    return name, target
+
+
+def create_job(data):
+    """Validate and queue a job; returns its ID. data: target_id, scanner."""
+    name, target = scanner_and_target(data)
     if not target["enabled"]:
         raise validation.InputError("The target is disabled.")
-    if not current_app.config[scanner.API_KEY]:
+    return queue_job(current_app._get_current_object(), # current Flask app instance - to pass to the new thread
+                     get_db(), target, name, user_id=g.user["user_id"])
+
+
+def queue_job(app, conn, target, name, user_id=None, schedule_id=None):
+    """Insert a queued job and submit it to its scanner's queue; returns its ID.
+
+    Started either by a user (user_id) or by a schedule (schedule_id). The
+    caller has checked that the scanner fits the target. Anything the caller
+    changed in conn's open transaction is committed together with the job.
+    """
+    scanner = SCANNERS[name]
+    if not app.config[scanner.API_KEY]:
         raise validation.InputError(f"The {name} scanner has no API key; set ASMA_{scanner.API_KEY}.")
     # No scanner takes options yet, so all jobs have the same params.
-    params = scanners.canonical({})
+    params = "{}"
     fingerprint = hashlib.sha256(params.encode()).hexdigest()
-    if db.execute("SELECT 1 FROM jobs WHERE target_id = ? AND scanner = ? AND params_fingerprint = ? "
-                  "AND status IN ('queued', 'running')", (target_id, name, fingerprint)).fetchone():
+    if conn.execute("SELECT 1 FROM jobs WHERE target_id = ? AND scanner = ? AND params_fingerprint = ? "
+                    "AND status IN ('queued', 'running')",
+                    (target["target_id"], name, fingerprint)).fetchone():
         raise validation.InputError(f"A {name} scan of {target['value']} is already queued or "
                                     f"running with the same parameters.", 409)
 
-    job_id = db.execute(
-        "INSERT INTO jobs (target_id, created_by_user_id, scanner, params, params_fingerprint, "
-        "queued_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (target_id, g.user["user_id"], name, params, fingerprint, now())).lastrowid
-    audit("job.create", details={"job_id": job_id, "scanner": name, "target_id": target_id,
-                                 "value": target["value"]})
-    db.commit()
+    job_id = conn.execute(
+        "INSERT INTO jobs (target_id, schedule_id, created_by_user_id, scanner, params, "
+        "params_fingerprint, queued_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (target["target_id"], schedule_id, user_id, name, params, fingerprint, now())).lastrowid
+    audit("job.create", details={"job_id": job_id, "scanner": name, "target_id": target["target_id"],
+                                 "value": target["value"], "schedule_id": schedule_id}, conn=conn)
+    conn.commit()
     # Submits the job to the Flasks's background queue, which runs it in a separate thread.
-    current_app.extensions["asma_queues"][name].submit(
+    app.extensions["asma_queues"][name].submit(
         run_job, # the function to run, followed by its arguments
-        current_app._get_current_object(), # current Flask app instance - to pass to the new thread
+        app,
         job_id
     )
     return job_id

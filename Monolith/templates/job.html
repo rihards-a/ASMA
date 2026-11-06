@@ -7,7 +7,7 @@
   <tr><th>Scanner</th><td>{{ job.scanner }}</td></tr>
   <tr><th>Status</th><td>{{ job.status }}</td></tr>
   {% if job.error %}<tr><th>Error</th><td>{{ job.error }}</td></tr>{% endif %}
-  <tr><th>Started by</th><td>{{ job.created_by or "" }}</td></tr>
+  <tr><th>Started by</th><td>{% if job.schedule_id %}schedule {{ job.schedule_id }}{% else %}{{ job.created_by or "" }}{% endif %}</td></tr>
   <tr><th>Queued</th><td>{{ job.queued_at }}</td></tr>
   <tr><th>Started</th><td>{{ job.started_at or "" }}</td></tr>
   <tr><th>Finished</th><td>{{ job.finished_at or "" }}</td></tr>

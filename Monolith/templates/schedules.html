@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Schedules</h1>
+<p>Cron times in UTC. A paused schedule, or one whose target is disabled, starts no jobs.</p>
+<table>
+  <tr><th>Schedule</th><th>Scanner</th><th>Target</th><th>Cron</th><th>Enabled</th><th>Last run</th><th>Created by</th><th></th></tr>
+  {% for s in schedules %}
+  <tr>
+    <td>{{ s.schedule_id }}</td>
+    <td>{{ s.scanner }}</td>
+    <td class="mono"><a href="{{ url_for('targets.view', target_id=s.target_id) }}">{{ s.target_value }}</a></td>
+    <td class="mono">{{ s.cron }}</td>
+    <td>{{ "yes" if s.enabled else "no" }}</td>
+    <td>{{ s.last_run_at or "" }}</td>
+    <td>{{ s.created_by }}</td>
+    <td>
+      {% if g.user.role == "operator" %}
+      <form class="inline" method="post" action="{{ url_for('schedules.edit', schedule_id=s.schedule_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% if not s.enabled %}<input type="hidden" name="enabled" value="1">{% endif %}
+        <button>{{ "Pause" if s.enabled else "Resume" }}</button>
+      </form>
+      <form class="inline" method="post" action="{{ url_for('schedules.delete', schedule_id=s.schedule_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button>Delete</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="8">No schedules yet.</td></tr>
+  {% endfor %}
+</table>
+
+{% if g.user.role == "operator" %}
+<h2>New schedule</h2>
+<form method="post" action="{{ url_for('schedules.create') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label for="target_id">Target</label>
+  <select id="target_id" name="target_id">
+    {% for t in targets %}<option value="{{ t.target_id }}">{{ t.kind }}: {{ t.value }} ({{ t.label }})</option>{% endfor %}
+  </select>
+  <label for="scanner">Scanner</label>
+  <select id="scanner" name="scanner">
+    {% for name, s in scanners.items() %}<option value="{{ name }}">{{ name }} (scans {{ s.TARGET_KIND }} targets)</option>{% endfor %}
+  </select>
+  <label for="cron">Cron: minute, hour, day of month, month, day of week (0 is Sunday).
+    Each field takes *, n, n-m, */step or n-m/step, or a comma-separated list of them.
+    Example: 0 3 * * 1 is Mondays at 03:00 UTC.</label>
+  <input id="cron" name="cron" class="mono" placeholder="0 3 * * 1" required>
+  <p><label><input type="checkbox" name="enabled" checked> Enabled</label></p>
+  <p><button>Create schedule</button></p>
+</form>
+{% endif %}
+{% endblock %}

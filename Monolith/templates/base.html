@@ -21,6 +21,7 @@
 {% if g.user %}
 <nav>
   <a href="{{ url_for('targets.search') }}">Targets</a>
+  <a href="{{ url_for('schedules.search') }}">Schedules</a>
   <a href="{{ url_for('jobs.search') }}">Jobs</a>
   {% if g.user.role == "operator" %}
   <a href="{{ url_for('users.search') }}">Users</a>

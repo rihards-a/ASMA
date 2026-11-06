@@ -56,6 +56,7 @@ def init_app(app):
         conn.execute("PRAGMA journal_mode = WAL")
     finally:
         conn.close()
+    # Cleanup function called at the end of an HTTP request (a context).
     app.teardown_appcontext(close_db)
 
 

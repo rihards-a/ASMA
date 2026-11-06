@@ -1,2 +1,0 @@
-# Run puredns weekly (Sunday at 07:05 UTC by default)
-5 7 * * 0 /app/run_puredns.sh

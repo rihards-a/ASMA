@@ -86,6 +86,8 @@ def revoke(key_id):
     return redirect(url_for("apikeys.search"))
 
 
+# The extra nesting here is necessary as it is a decorator factory,
+# which returns different decorators depending on the write field.
 def api_key_required(write=False):
     """Decorator for API routes: X-API-Key must be a valid key.
 

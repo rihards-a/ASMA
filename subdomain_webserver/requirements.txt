@@ -1,5 +1,0 @@
-# Webserver only. subfinder, puredns and massdns are installed as binaries in
-# the Docker image (see Dockerfile). generate_summary.py uses the stdlib only.
-# Bump these as needed.
-Flask==3.0.3
-gunicorn==23.0.0

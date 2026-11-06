@@ -1,4 +1,0 @@
-Requests==2.34.2
-httpx==0.28.1
-dnstwist==20250130
-dnspython==2.8.0

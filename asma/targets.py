@@ -16,7 +16,7 @@ from .auth import login_required, operator_required
 from .db import audit, get_db, now
 
 bp = Blueprint("targets", __name__)
-api = Blueprint("api", __name__, url_prefix="/api")
+api = Blueprint("targets_api", __name__, url_prefix="/api")
 
 KINDS = ("domain", "keyword", "network")
 

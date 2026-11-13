@@ -1,7 +1,7 @@
 """User management and the audit log. Operators only.
 
 Users are never deleted, only deactivated: other tables reference them.
-At least one active operator must always remain.
+At least one active operator will always remain, operators cannot deactivate themselves.
 """
 from flask import Blueprint, flash, g, redirect, render_template, request, url_for
 from werkzeug.security import generate_password_hash

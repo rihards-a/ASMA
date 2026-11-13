@@ -278,7 +278,6 @@ def api_create():
 @api.route("/schedules/<int:schedule_id>")
 @api_key_required()
 def api_view(schedule_id):
-    schedule = get_schedule(schedule_id)
     return jsonify(get_schedule(schedule_id) or abort(404, "Schedule not found."))
  
 

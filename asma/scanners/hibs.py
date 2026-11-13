@@ -4,9 +4,8 @@ The API streams one JSON object per line: Meta messages (progress,
 heartbeats, the stored result's ID, done) and enrichment messages about
 one permutation each (DNS, GeoIP, WHOIS, ...). Every permutation line is
 kept as raw output; the finding only records the permutation kinds, the
-rest stays in the artifact. The scan is complete when the StoredResult or
-Done message arrives: a stream ending without one is a failed scan, not
-a shorter result.
+rest stays in the artifact. The scan is complete when the Done message
+arrives: a stream ending without it is a failed scan, not a shorter result.
 """
 import json
 

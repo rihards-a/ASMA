@@ -68,4 +68,32 @@ def create_app():
             return {"error": exc.description}, exc.code
         return exc
 
+    @app.after_request
+    def security_headers(response):
+        """Browser security headers, added to every response."""
+        # Content Security Policy: which resources the browser may load for this page.
+        #   default-src 'none'          nothing may be loaded (scripts, images, fonts,
+        #                               connections) unless a directive below allows it;
+        #                               also the pages does not use JavaScript.
+        #   style-src 'self'            stylesheets only from this application.
+        #   form-action 'self'          forms may only be submitted to this application.
+        #   base-uri 'none'             a <base> tag cannot redirect the page's relative links.
+        #   frame-ancestors 'none'      no site (this one included) may show the page in a
+        #                               frame; stops clickjacking, where another site lays an
+        #                               invisible frame over its own page in an attempt to
+        #                               trick the signed in user into performing actions.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; style-src 'self'; form-action 'self'; "
+            "base-uri 'none'; frame-ancestors 'none'")
+        # The older header for the same framing rule, for browsers that ignore frame-ancestors.
+        response.headers["X-Frame-Options"] = "DENY"
+        # The browser must use the declared Content-Type and not guess one from the content,
+        # so a downloaded artifact (scanner output) is not run as HTML or script.
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # Neither the browser nor anything in between may store a copy of the response:
+        # pages show scan results, the audit log and, once, a new API key, which must not
+        # stay in the browser cache or be shown again with the Back button.
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     return app

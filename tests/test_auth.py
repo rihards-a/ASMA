@@ -74,3 +74,20 @@ def test_viewer_is_refused_and_audited(viewer, db):
                                      "label": "x"}).status_code == 403
     denied = audit_events(db, "access.denied")
     assert [(e["outcome"], e["actor_type"]) for e in denied] == [("denied", "user")] * 2
+
+
+def test_security_headers(client):
+    """Every response, page or API, carries the browser security headers."""
+    for response in (client.get("/login"), client.get("/api/health")):
+        assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_stylesheet_is_served(client):
+    """The CSP allows styles from this application only, so the pages link a file."""
+    assert b"/static/style.css" in client.get("/login").data
+    response = client.get("/static/style.css")
+    assert response.status_code == 200 and response.mimetype == "text/css"
+    assert "style-src 'self'" in response.headers["Content-Security-Policy"]

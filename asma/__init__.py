@@ -93,7 +93,9 @@ def create_app():
         # Neither the browser nor anything in between may store a copy of the response:
         # pages show scan results, the audit log and, once, a new API key, which must not
         # stay in the browser cache or be shown again with the Back button.
-        response.headers["Cache-Control"] = "no-store"
+        # The built in static endpoint is an exception.
+        if request.endpoint != "static":
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     return app

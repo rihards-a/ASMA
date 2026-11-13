@@ -32,7 +32,7 @@ def test_domain():
     assert validation.domain("Example.COM") == "example.com"
     assert validation.domain("xn--bcher-kva.de") == "xn--bcher-kva.de"
     for bad in ("localhost", "example.com.", "a..b", "-bad.com", "ex_ample.com", "example.c",
-                "bücher.de"):
+                "bücher.de", "example.123", "192.168.1.10"):
         assert rejects(validation.domain, bad)
 
 

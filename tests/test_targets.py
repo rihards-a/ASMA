@@ -1,4 +1,6 @@
 """targets.py: target pages and the REST API."""
+from pathlib import Path
+
 import pytest
 
 from conftest import LONG_AGO, add_api_key, add_target, audit_events, post
@@ -59,6 +61,34 @@ def test_delete_removes_history(operator, db):
     assert db.execute("SELECT count(*) FROM targets").fetchone()[0] == 0
     assert db.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
 
+
+def test_delete_removes_artifact_files(app, operator, db):
+    """The rows go through ON DELETE CASCADE; the files are removed by delete_target."""
+    target_id = add_target(db, "network", "203.0.113.0/30")
+    job_id = db.execute("INSERT INTO jobs (target_id, created_by_user_id, scanner, "
+                        "params_fingerprint, status, queued_at, finished_at) "
+                        "VALUES (?, 1, 'shodan', ?, 'completed', ?, ?)",
+                        (target_id, "f" * 64, LONG_AGO, LONG_AGO)).lastrowid
+    folder = Path(app.config["DATABASE"]).parent / "artifacts" / str(job_id)
+    folder.mkdir(parents=True)
+    (folder / "shodan.json").write_text("{}")
+    post(operator, f"/targets/{target_id}/delete")
+    assert not folder.exists()
+
+
+def test_deleted_ids_are_not_reused(operator, db):
+    """AUTOINCREMENT: a new target never gets the id of a deleted one, so audit
+    events that name an id always mean one target."""
+    first = add_target(db, "keyword", "first")
+    post(operator, f"/targets/{first}/delete")
+    assert add_target(db, "keyword", "second") != first
+
+
+def test_api_keyword_ids_must_be_a_list(client, db, headers):
+    add_target(db, "keyword", "k1")
+    response = client.post("/api/targets", headers=headers, json={
+        "kind": "domain", "value": "example.com", "label": "x", "keyword_ids": "1"})
+    assert response.status_code == 400 and "must be a list" in response.json["error"]
 
 # ---------------------------------------------------------------------------
 # REST API

@@ -76,6 +76,7 @@ def domain(value):
             for label in labels
         )
         or len(labels[-1]) < 2
+        or labels[-1].isdigit()  # No TLD is all digits, this also prevents IPv4 addresses.
     ):
         raise InputError("Invalid domain name.")
     return value

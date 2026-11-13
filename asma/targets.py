@@ -4,6 +4,9 @@ The same functions serve the web pages (blueprint "targets") and the REST API
 (blueprint "api"). Kind and value never change after creation (the database
 enforces it), because a target's scan history refers to them.
 """
+import shutil
+from pathlib import Path
+
 from flask import (Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template,
                    request, url_for)
 
@@ -42,6 +45,8 @@ def clean_keyword_ids(values, kind):
         return []
     if kind != "domain":
         raise validation.InputError("Only domain targets can have keywords.")
+    if not isinstance(values, list):
+        raise validation.InputError("keyword_ids must be a list.")
     try:
         ids = sorted({int(v) for v in values})
     except (TypeError, ValueError):
@@ -127,12 +132,18 @@ def update_target(target, data):
 
 
 def delete_target(target):
-    """Delete a target; the database removes its links, schedules, jobs and findings too."""
+    """Delete a target; the database removes its links, schedules, jobs, findings and
+    artifact rows, and the jobs' artifact files are removed after the commit."""
     db = get_db()
+    job_ids = [r[0] for r in db.execute("SELECT job_id FROM jobs WHERE target_id = ?",
+                                        (target["target_id"],))]
     db.execute("DELETE FROM targets WHERE target_id = ?", (target["target_id"],))
     audit("target.delete", details={"target_id": target["target_id"], "kind": target["kind"],
                                     "value": target["value"]})
     db.commit()
+    artifacts = Path(current_app.config["DATABASE"]).parent / "artifacts"
+    for job_id in job_ids:
+        shutil.rmtree(artifacts / str(job_id), ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

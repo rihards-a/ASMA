@@ -14,9 +14,11 @@
 --   INTEGER column, for example). "STRICT" at the end of a table switches that
 --   off, so every column only accepts its declared type: INTEGER, TEXT, etc.
 --
--- INTEGER PRIMARY KEY
+-- INTEGER PRIMARY KEY AUTOINCREMENT
 --   A column declared exactly like this becomes the row's internal id. When a
---   row is inserted without a value for it, SQLite assigns the next free number.
+--   row is inserted without a value for it, SQLite assigns a new integer greater
+--   than any previously assigned row id. Previously committed ids are never reused,
+--   even after their rows are deleted. Gaps in the sequence are possible.
 --
 -- No date, boolean or JSON types
 --   SQLite has no dedicated types for these, so this schema uses conventions:
@@ -92,7 +94,7 @@ PRAGMA foreign_keys = ON;
 -- Users are never deleted, only deactivated, because other tables reference them.
 -- (The foreign keys pointing here have no ON DELETE clause, so a DELETE fails.)
 CREATE TABLE users (
-    user_id               INTEGER PRIMARY KEY,
+    user_id               INTEGER PRIMARY KEY AUTOINCREMENT,
     -- Login name; unique regardless of letter case.
     username              TEXT    NOT NULL COLLATE NOCASE UNIQUE
                                   CHECK (length(username) BETWEEN 3 AND 50),
@@ -107,7 +109,7 @@ CREATE TABLE users (
     password_changed_at   TEXT    NOT NULL,
     last_login_at         TEXT,
     -- Operator who created the account.
-    -- NULL only for the first operator, created from the CLI.
+    -- NULL only for the first operator, created from the init.
     created_by_user_id    INTEGER REFERENCES users (user_id),
     created_at            TEXT    NOT NULL
 ) STRICT;
@@ -122,7 +124,7 @@ CREATE TABLE users (
 -- stores only the prefix and a hash of the whole key, so a stolen database
 -- file does not reveal usable keys.
 CREATE TABLE api_keys (
-    api_key_id    INTEGER PRIMARY KEY,
+    api_key_id    INTEGER PRIMARY KEY AUTOINCREMENT,
     -- Owner. A key cannot exist without the account it belongs to.
     user_id       INTEGER NOT NULL REFERENCES users (user_id),
     -- What the key is for, e.g. "n8n weekly report workflow". Optional;
@@ -161,7 +163,7 @@ CREATE UNIQUE INDEX ux_api_keys_active_prefix ON api_keys (user_id, key_prefix)
 -- * keyword: a brand word, e.g. example (feeds the squatting scans of domains);
 -- * network: an IPv4 CIDR block or range, e.g. 203.0.113.0/24 (Shodan and nmap).
 CREATE TABLE targets (
-    target_id           INTEGER PRIMARY KEY,
+    target_id           INTEGER PRIMARY KEY AUTOINCREMENT,
     kind                TEXT    NOT NULL CHECK (kind IN ('domain', 'keyword', 'network')),
     -- Normalised value. Must be lowercase, so "Example.com" cannot be added
     -- next to "example.com" (UNIQUE below compares case-sensitively).
@@ -231,7 +233,7 @@ END;
 -- Schedules are soft-deleted (deleted_at) so that the jobs they started keep their origin.
 -- "Deleting" a schedule in the UI sets deleted_at and hides it; the row stays.
 CREATE TABLE schedules (
-    schedule_id         INTEGER PRIMARY KEY,
+    schedule_id         INTEGER PRIMARY KEY AUTOINCREMENT,
     target_id           INTEGER NOT NULL REFERENCES targets (target_id) ON DELETE CASCADE,
     scanner             TEXT    NOT NULL CHECK (scanner IN ('opensquat', 'hibs', 'dnstwist', 'subfinder',
                                                             'puredns', 'shodan', 'nmap')),
@@ -270,7 +272,7 @@ CREATE UNIQUE INDEX ux_schedules_live ON schedules (target_id, scanner, cron, pa
 -- Jobs still running when the application stops are marked interrupted at the
 -- next start. completed, failed, cancelled and interrupted are final states.
 CREATE TABLE jobs (
-    job_id                   INTEGER PRIMARY KEY,
+    job_id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     target_id                INTEGER NOT NULL REFERENCES targets (target_id) ON DELETE CASCADE,
     -- Origin: started by a schedule or directly by a user, never both.
     -- NO ACTION (default) blocks direct schedule deletes but lets a target delete cascade.
@@ -376,7 +378,7 @@ END;
 --   shodan                      IPv4 address           203.0.113.10
 --   nmap                        IPv4 address:TCP port  203.0.113.10:443
 CREATE TABLE findings (
-    finding_id   INTEGER PRIMARY KEY,
+    finding_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id       INTEGER NOT NULL REFERENCES jobs (job_id) ON DELETE CASCADE,
     -- Tool that produced the finding (always equal to the job's scanner).
     scanner      TEXT    NOT NULL CHECK (scanner IN ('opensquat', 'hibs', 'dnstwist', 'subfinder',
@@ -409,13 +411,13 @@ BEGIN
     SELECT RAISE(ABORT, 'finding scanner must match its job''s scanner');
 END;
 
--- Raw output files of a job; deleted by retention after 90 days.
+-- Raw output files of a job.
 -- The files themselves live on disk under the data directory; this table
 -- records where they are and their checksum. Deleting rows (also through
--- ON DELETE CASCADE) does not delete files: the application removes a job's
--- files after deleting its rows, and daily maintenance removes leftovers.
+-- ON DELETE CASCADE) does not delete files: when a target is deleted, the
+-- application removes its jobs' files after deleting the rows.
 CREATE TABLE artifacts (
-    artifact_id  INTEGER PRIMARY KEY,
+    artifact_id  INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id       INTEGER NOT NULL REFERENCES jobs (job_id) ON DELETE CASCADE,
     -- File name, e.g. nmap.xml.gz, job.log; unique within a job.
     name         TEXT    NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
@@ -430,21 +432,17 @@ CREATE TABLE artifacts (
     UNIQUE (job_id, name)
 ) STRICT;
 
--- Retention: find artifacts older than 90 days.
-CREATE INDEX ix_artifacts_created ON artifacts (created_at);
-
 -- ---------------------------------------------------------------------------
 -- Audit
 -- ---------------------------------------------------------------------------
 
--- Security log; deleted by retention after 365 days.
+-- Security log.
 -- One row per security-relevant action: sign-ins (including failed ones),
--- changes to accounts, keys, targets, schedules and jobs, refused actions,
--- artifact downloads, start-up and daily maintenance. Ordinary page views are
--- not logged. Each event is also written to standard output so it can be
--- collected outside the host.
+-- sign-outs, rejected API keys, password changes, changes to accounts, keys,
+-- targets, schedules and jobs, refused actions, artifact downloads and the
+-- creation of the first operator. Ordinary page views are not logged.
 CREATE TABLE audit_events (
-    event_id     INTEGER PRIMARY KEY,
+    event_id     INTEGER PRIMARY KEY AUTOINCREMENT,
     occurred_at  TEXT    NOT NULL,
     -- Who acted: a signed-in user, a user's API key, an unauthenticated client, or the system.
     actor_type   TEXT    NOT NULL CHECK (actor_type IN ('user', 'api_key', 'anonymous', 'system')),
@@ -452,7 +450,7 @@ CREATE TABLE audit_events (
     user_id      INTEGER REFERENCES users (user_id),
     -- Key used; set only for api_key events.
     api_key_id   INTEGER REFERENCES api_keys (api_key_id),
-    -- Client address; NULL only for system events (scheduler, maintenance, CLI).
+    -- Client address; NULL only for system events (scheduler, maintenance).
     -- 45 characters fits the longest IPv6 text form.
     source_ip    TEXT    CHECK (source_ip IS NULL OR length(source_ip) <= 45),
     -- Dotted function name, e.g. auth.login, target.delete.
@@ -476,7 +474,7 @@ CREATE TABLE audit_events (
     )
 ) STRICT;
 
--- Audit log screen (newest first, time filters) and retention.
+-- Audit events in time order.
 CREATE INDEX ix_audit_time   ON audit_events (occurred_at);
 -- Events from one client address, e.g. failed sign-ins from one IP.
 CREATE INDEX ix_audit_source ON audit_events (source_ip, occurred_at) WHERE source_ip IS NOT NULL;

@@ -71,6 +71,39 @@ def get_findings(job_id):
                             (job_id,)).fetchall()
 
 
+def compare(conn, job_id):
+    """Compare a completed job's findings with its baseline: the previous completed
+    job of the same series. Returns (baseline_id, changes); baseline_id is None
+    when there is no baseline, e.g. for the first completed job of a series.
+
+    The baseline is the highest lower job_id of the series, because a series runs
+    one job at a time and ids are never reused.
+
+    changes holds three dicts keyed by finding_key:
+      added    this job's findings that the baseline did not have
+      removed  the baseline's findings that this job did not find
+      changed  the baseline's version of findings whose details differ now
+    """
+    row = conn.execute(
+        "SELECT b.job_id FROM jobs AS j JOIN jobs AS b ON b.target_id = j.target_id "
+        "AND b.scanner = j.scanner AND b.params_fingerprint = j.params_fingerprint "
+        "WHERE j.job_id = ? AND j.status = 'completed' AND b.status = 'completed' "
+        "AND b.job_id < j.job_id ORDER BY b.job_id DESC LIMIT 1", (job_id,)).fetchone()
+    if not row:
+        return None, {"added": {}, "removed": {}, "changed": {}}
+
+    def by_key(jid):
+        return {f["finding_key"]: f for f in conn.execute(
+            "SELECT * FROM findings WHERE job_id = ? ORDER BY finding_key", (jid,))}
+    current, before = by_key(job_id), by_key(row[0])
+    return row[0], {
+        "added": {k: f for k, f in current.items() if k not in before},
+        "removed": {k: f for k, f in before.items() if k not in current},
+        "changed": {k: before[k] for k, f in current.items()
+                    if k in before and f["details"] != before[k]["details"]},
+    }
+
+
 def scanner_and_target(data):
     """The scanner name and the target row named in data, checked to fit each
     other. Shared by jobs and schedules. data: target_id, scanner."""
@@ -219,6 +252,11 @@ def complete(app, conn, job_id, name, findings, raw):
                      "VALUES (?, ?, ?, ?)",
                      [(job_id, name, key, details_json(details))
                       for key, details in findings.items()])
+    baseline_id, changes = compare(conn, job_id)
+    if baseline_id:
+        conn.execute("UPDATE jobs SET added_count = ?, removed_count = ?, changed_count = ? "
+                     "WHERE job_id = ?", (len(changes["added"]), len(changes["removed"]),
+                                          len(changes["changed"]), job_id))
     if raw:
         conn.execute("INSERT INTO artifacts (job_id, name, rel_path, media_type, size_bytes, "
                      "sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -272,8 +310,9 @@ def view(job_id):
     job = get_job(job_id) or abort(404)
     artifacts = get_db().execute("SELECT * FROM artifacts WHERE job_id = ? ORDER BY name",
                                  (job_id,)).fetchall()
+    baseline_id, changes = compare(get_db(), job_id)
     return render_template("job.html", job=job, findings=get_findings(job_id),
-                           artifacts=artifacts)
+                           artifacts=artifacts, baseline_id=baseline_id, changes=changes)
 
 
 @bp.route("/jobs/<int:job_id>/cancel", methods=["POST"])
@@ -313,6 +352,11 @@ def job_json(job):
     return {**job, "params": json.loads(job["params"])}
 
 
+def finding_json(finding):
+    """A finding as the API returns it: details as an object instead of text."""
+    return {"finding_key": finding["finding_key"], "details": json.loads(finding["details"])}
+
+
 @api.route("/jobs")
 @api_key_required()
 def api_search():
@@ -329,11 +373,16 @@ def api_create():
 @api.route("/jobs/<int:job_id>")
 @api_key_required()
 def api_view(job_id):
-    """The job with its findings (details as objects)."""
+    """The job with its findings and, when it has a baseline, the diff: the keys
+    of added findings and the removed and changed findings."""
     job = get_job(job_id) or abort(404, "Job not found.")
-    findings = [{"finding_key": f["finding_key"], "details": json.loads(f["details"])}
-                for f in get_findings(job_id)]
-    return jsonify({**job_json(job), "findings": findings})
+    result = {**job_json(job), "findings": [finding_json(f) for f in get_findings(job_id)], "diff": None}
+    baseline_id, changes = compare(get_db(), job_id)
+    if baseline_id:
+        result["diff"] = {"baseline_job_id": baseline_id, "added": list(changes["added"]),
+                          "removed": [finding_json(f) for f in changes["removed"].values()],
+                          "changed": [finding_json(f) for f in changes["changed"].values()]}
+    return jsonify(result)
 
 
 @api.route("/jobs/<int:job_id>/cancel", methods=["POST"])

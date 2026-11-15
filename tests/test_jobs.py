@@ -188,3 +188,26 @@ def test_pages(operator, viewer, db, queue, monkeypatch):
     assert "job-1-opensquat.json" in download.headers["Content-Disposition"]
     assert audit_events(db, "artifact.download")[0]["user_id"] == 2
     assert viewer.get("/jobs/1/artifacts/999").status_code == 404
+
+
+def test_diff_against_previous_completed_job(client, db, headers, queue, monkeypatch):
+    """Job 1 has no baseline, job 2 fails and is skipped, job 3 is compared with job 1."""
+    results = iter([{"a.com": {}, "b.com": {"risk": 1}}, None, {"b.com": {"risk": 2}, "c.com": {}}])
+
+    def scan(value, api_key, checkpoint):
+        findings = next(results)
+        if findings is None:
+            raise common.ScanError("down")
+        return findings, b""
+    fake_scanner(monkeypatch, "opensquat", scan)
+    target_id = add_target(db, "keyword", "example")
+    for _ in range(3):
+        start(client, headers, target_id, "opensquat")
+        queue.run()
+
+    assert job_row(db, 1)["added_count"] is None
+    assert [job_row(db, 3)[c] for c in ("added_count", "removed_count", "changed_count")] == [1, 1, 1]
+    assert client.get("/api/jobs/3", headers=headers).json["diff"] == {
+        "baseline_job_id": 1, "added": ["c.com"],
+        "removed": [{"finding_key": "a.com", "details": {}}],
+        "changed": [{"finding_key": "b.com", "details": {"risk": 1}}]}

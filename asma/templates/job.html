@@ -22,13 +22,37 @@
 </form>
 {% endif %}
 
+{% if baseline_id %}
+<p>Compared with <a href="{{ url_for('jobs.view', job_id=baseline_id) }}">job {{ baseline_id }}</a>,
+  the previous completed job of the same target and scanner:
+  {{ changes.added|length }} new, {{ changes.removed|length }} removed, {{ changes.changed|length }} changed.</p>
+{% elif job.status == "completed" %}
+<p>First completed job of this target and scanner, so there is nothing to compare with.</p>
+{% endif %}
+
 <h2>Findings ({{ findings|length }})</h2>
 <table>
-  <tr><th>Key</th><th>Details</th></tr>
+  <tr><th>Key</th><th>Change</th><th>Details</th></tr>
   {% for f in findings %}
-  <tr><td class="mono">{{ f.finding_key }}</td><td class="mono">{{ f.details }}</td></tr>
+    {% set before = changes.changed.get(f.finding_key) %}
+    <tr>
+      <td class="mono">{{ f.finding_key }}</td>
+      <td>{% if f.finding_key in changes.added %}new{% elif before %}changed{% endif %}</td>
+      <td class="mono">{{ f.details }}{% if before %}<br>Before: {{ before.details }}{% endif %}</td>
+    </tr>
   {% else %}
-  <tr><td colspan="2">No findings.</td></tr>
+    <tr><td colspan="3">No findings.</td></tr>
   {% endfor %}
 </table>
+
+{% if changes.removed %}
+<h2>Removed ({{ changes.removed|length }})</h2>
+<p>Found by job {{ baseline_id }}, not found by this job.</p>
+<table>
+  <tr><th>Key</th><th>Details</th></tr>
+  {% for f in changes.removed.values() %}
+    <tr><td class="mono">{{ f.finding_key }}</td><td class="mono">{{ f.details }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
 {% endblock %}

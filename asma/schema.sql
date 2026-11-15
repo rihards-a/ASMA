@@ -2,7 +2,7 @@
 -- Times are TEXT in UTC, format YYYY-MM-DDTHH:MM:SSZ. Booleans are INTEGER 0 or 1.
 --
 -- ===========================================================================
--- How to read this file (SQLite notes)
+-- SQLite syntax and oddities
 -- ===========================================================================
 --
 -- SQLite is a database stored in a single file (here /data/asma.db). There is
@@ -159,9 +159,9 @@ CREATE UNIQUE INDEX ux_api_keys_active_prefix ON api_keys (user_id, key_prefix)
 -- ---------------------------------------------------------------------------
 
 -- What is monitored, set by operators:
--- * domain:  a registered domain, e.g. example.com (squatting and subdomain scans);
--- * keyword: a brand word, e.g. example (feeds the squatting scans of domains);
--- * network: an IPv4 CIDR block or range, e.g. 203.0.113.0/24 (Shodan and nmap).
+-- * domain:  a registered domain, e.g. example.com (Have I Been Squatted);
+-- * keyword: a brand word, e.g. example (openSquat);
+-- * network: an IPv4 CIDR block or range, e.g. 203.0.113.0/24 (Shodan).
 CREATE TABLE targets (
     target_id           INTEGER PRIMARY KEY AUTOINCREMENT,
     kind                TEXT    NOT NULL CHECK (kind IN ('domain', 'keyword', 'network')),
@@ -222,12 +222,6 @@ END;
 -- ---------------------------------------------------------------------------
 -- Schedules and jobs
 -- ---------------------------------------------------------------------------
---
--- params (in both tables) are the scanner options as a JSON object, e.g.
--- {"ports": "top100"} for nmap. The application always stores them in one
--- canonical form: defaults filled in, keys sorted, no spaces. That way equal
--- options always produce equal text, which the UNIQUE index on schedules and
--- the fingerprint on jobs rely on.
 
 -- Recurring scans: run one scanner on one target on a cron timetable.
 -- Schedules are soft-deleted (deleted_at) so that the jobs they started keep their origin.
@@ -235,12 +229,9 @@ END;
 CREATE TABLE schedules (
     schedule_id         INTEGER PRIMARY KEY AUTOINCREMENT,
     target_id           INTEGER NOT NULL REFERENCES targets (target_id) ON DELETE CASCADE,
-    scanner             TEXT    NOT NULL CHECK (scanner IN ('opensquat', 'hibs', 'dnstwist', 'subfinder',
-                                                            'puredns', 'shodan', 'nmap')),
+    scanner             TEXT    NOT NULL CHECK (scanner IN ('opensquat', 'hibs', 'subfinder')),
     -- Standard 5-field cron expression, e.g. "0 3 * * 1" (Mondays at 03:00).
     cron                TEXT    NOT NULL CHECK (length(cron) BETWEEN 9 AND 100),
-    params              TEXT    NOT NULL DEFAULT '{}'
-                                CHECK (json_valid(params) AND json_type(params) = 'object'),
     -- 0 pauses the schedule.
     enabled             INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
     -- Operator who created the schedule. Jobs it starts are attributed to this user.
@@ -257,15 +248,11 @@ CREATE TABLE schedules (
 CREATE INDEX ix_schedules_target ON schedules (target_id);
 -- No two live schedules may be identical.
 -- A deleted schedule does not block re-creating the same schedule.
-CREATE UNIQUE INDEX ux_schedules_live ON schedules (target_id, scanner, cron, params)
+CREATE UNIQUE INDEX ux_schedules_live ON schedules (target_id, scanner, cron)
     WHERE deleted_at IS NULL;
 
--- One scan run. A series is (target_id, scanner, params_fingerprint); the baseline of a job
--- is the previous completed job of its series and is derived by query, not stored.
---
--- "What changed since last time" compares a job's findings with that baseline.
--- Only jobs of the same series are compared, so e.g. a top-100 port scan is
--- never compared with a full port scan of the same network.
+-- One scan run. A series is (target_id, scanner); the baseline of a job is the
+-- previous completed job of its series and is derived by query, not stored.
 --
 -- Status flow: a job starts as queued, becomes running, and ends as
 -- completed, failed or cancelled (a queued job can also be cancelled).
@@ -279,13 +266,7 @@ CREATE TABLE jobs (
     schedule_id              INTEGER REFERENCES schedules (schedule_id),
     -- User who started the job (web or API); NULL for scheduled jobs.
     created_by_user_id       INTEGER REFERENCES users (user_id),
-    scanner                  TEXT    NOT NULL CHECK (scanner IN ('opensquat', 'hibs', 'dnstwist',
-                                                 'subfinder', 'puredns', 'shodan', 'nmap')),
-    params                   TEXT    NOT NULL DEFAULT '{}'
-                                     CHECK (json_valid(params) AND json_type(params) = 'object'),
-    -- SHA-256 (64 hex characters) of the canonical params text. Equal options
-    -- give an equal fingerprint, which defines the series of the job.
-    params_fingerprint       TEXT    NOT NULL CHECK (length(params_fingerprint) = 64),
+    scanner                  TEXT    NOT NULL CHECK (scanner IN ('opensquat', 'hibs', 'shodan')),
     status                   TEXT    NOT NULL DEFAULT 'queued'
                                      CHECK (status IN ('queued', 'running', 'completed',
                                                        'failed', 'cancelled', 'interrupted')),
@@ -311,10 +292,10 @@ CREATE TABLE jobs (
 -- At most one queued or running job per series.
 -- (Prevents starting the same scan twice at once, and keeps the jobs of a
 -- series strictly one after another, which the baseline rule relies on.)
-CREATE UNIQUE INDEX ux_jobs_active ON jobs (target_id, scanner, params_fingerprint)
+CREATE UNIQUE INDEX ux_jobs_active ON jobs (target_id, scanner)
     WHERE status IN ('queued', 'running');
 -- Baseline and latest-job lookup.
-CREATE INDEX ix_jobs_baseline ON jobs (target_id, scanner, params_fingerprint, finished_at)
+CREATE INDEX ix_jobs_baseline ON jobs (target_id, scanner, finished_at)
     WHERE status = 'completed';
 -- Jobs of a target: target page listing and the ON DELETE CASCADE from targets.
 -- ux_jobs_active and ix_jobs_baseline start with target_id but are partial, so neither serves this.
@@ -343,13 +324,11 @@ END;
 -- (The series, the baseline and trg_jobs_schedule_match all assume these
 -- columns never change after the insert.)
 CREATE TRIGGER trg_jobs_identity_immutable
-BEFORE UPDATE OF target_id, schedule_id, created_by_user_id, scanner, params, params_fingerprint ON jobs
+BEFORE UPDATE OF target_id, schedule_id, created_by_user_id, scanner ON jobs
 WHEN NEW.target_id IS NOT OLD.target_id
   OR NEW.schedule_id IS NOT OLD.schedule_id
   OR NEW.created_by_user_id IS NOT OLD.created_by_user_id
   OR NEW.scanner IS NOT OLD.scanner
-  OR NEW.params IS NOT OLD.params
-  OR NEW.params_fingerprint IS NOT OLD.params_fingerprint
 BEGIN
     SELECT RAISE(ABORT, 'job identity is immutable');
 END;
@@ -373,23 +352,18 @@ END;
 -- by finding_key.
 --
 -- finding_key per scanner (always normalised by the scanner adapter):
---   opensquat, hibs, dnstwist   lookalike domain       examp1e-login.com
---   subfinder, puredns          subdomain              vpn.example.com
+--   hibs, opensquat             lookalike domain       examp1e-login.com
 --   shodan                      IPv4 address           203.0.113.10
---   nmap                        IPv4 address:TCP port  203.0.113.10:443
 CREATE TABLE findings (
     finding_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id       INTEGER NOT NULL REFERENCES jobs (job_id) ON DELETE CASCADE,
-    -- Tool that produced the finding (always equal to the job's scanner).
-    scanner      TEXT    NOT NULL CHECK (scanner IN ('opensquat', 'hibs', 'dnstwist', 'subfinder',
-                                                     'puredns', 'shodan', 'nmap')),
     -- Lowercase so that one domain is never stored under two spellings,
     -- which would show up as "removed" and "added" at the same time.
-    -- 300 characters fits the longest case: a 253-character name plus ":65535".
-    finding_key  TEXT    NOT NULL CHECK (length(finding_key) BETWEEN 1 AND 300
+    -- 300 characters fits the longest case: a 253-character domain name.
+    finding_key  TEXT    NOT NULL CHECK (length(finding_key) BETWEEN 1 AND 253
                                          AND finding_key = lower(finding_key)),
     -- Everything known about the finding. Compared in full by the diff, so any change is reported.
-    -- e.g. nmap: {"state": "open", "service": "unknown", "fingerprint": "SF-Port8443-TCP:..."}.
+    -- e.g. shodan: {"ports": [{"banner": "HTTP/1.1 200 OK...", "port": 443, "transport": "tcp"}]}.
     -- Values that change on every run regardless of the service (scan time,
     -- latency) are left out by the adapter. The adapter also truncates long
     -- fields and sets "truncated": true, so the 16 KB cap never aborts a job.
@@ -400,17 +374,6 @@ CREATE TABLE findings (
     UNIQUE (job_id, finding_key)
 ) STRICT;
 
--- History of one key across jobs, e.g. every scan that found 203.0.113.10:443.
-CREATE INDEX ix_findings_scanner_key ON findings (scanner, finding_key);
-
--- The tool recorded on a finding must be the tool of its job.
-CREATE TRIGGER trg_findings_scanner
-BEFORE INSERT ON findings
-WHEN NEW.scanner IS NOT (SELECT scanner FROM jobs WHERE job_id = NEW.job_id)
-BEGIN
-    SELECT RAISE(ABORT, 'finding scanner must match its job''s scanner');
-END;
-
 -- Raw output files of a job.
 -- The files themselves live on disk under the data directory; this table
 -- records where they are and their checksum. Deleting rows (also through
@@ -419,11 +382,11 @@ END;
 CREATE TABLE artifacts (
     artifact_id  INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id       INTEGER NOT NULL REFERENCES jobs (job_id) ON DELETE CASCADE,
-    -- File name, e.g. nmap.xml.gz, job.log; unique within a job.
+    -- File name, e.g. shodan.json; unique within a job.
     name         TEXT    NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
     -- Path relative to the data directory, generated by the system.
     rel_path     TEXT    NOT NULL UNIQUE,
-    -- Content type sent with downloads, e.g. application/gzip.
+    -- Content type sent with downloads, e.g. application/json.
     media_type   TEXT    NOT NULL,
     size_bytes   INTEGER NOT NULL CHECK (size_bytes >= 0),
     -- SHA-256 of the file (64 hex characters), to detect corruption or tampering.

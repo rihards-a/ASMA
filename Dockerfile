@@ -1,33 +1,5 @@
-# ASMA: the Flask application together with the scanner binaries it runs
-# (nmap, puredns, massdns), so no server needs its own platform-specific copies.
-
-# ---- Stage 1: build puredns (Go) and massdns (C) -----------------------------
-# Compatible Debian Trixie release with the runtime stage - massdns is linked with glibc.
-FROM golang:1.26-trixie AS builder
-
-# Build tools for massdns. The golang image currently ships them (through
-# buildpack-deps:trixie-scm); but installing them explicitly removes the dependency.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git make gcc libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# massdns does the actual resolving for puredns.
-RUN git clone --depth 1 --branch v1.1.0 https://github.com/blechschmidt/massdns.git /build/massdns \
-    && make -C /build/massdns
-
-# puredns, installed to /go/bin.
-RUN go install github.com/d3mondev/puredns/v2@v2.1.1
-
-# ---- Stage 2: runtime --------------------------------------------------------
+# ASMA: the Flask application, run by gunicorn as an unprivileged user.
 FROM python:3.14-slim-trixie
-
-# nmap from the Debian repositories.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends nmap \
-    && rm -rf /var/lib/apt/lists/*
-
-# copy the files from the previous build stage.
-COPY --from=builder /build/massdns/bin/massdns /go/bin/puredns /usr/local/bin/
 
 # Unprivileged user with a static UID, so the host can grant exactly this UID
 # access to the bind-mounted data directory. The home directory is used by

@@ -11,5 +11,3 @@ services:
     volumes:
       # Database and artifacts. The container runs as UID 10001, which needs rwX here.
       - ./data:/data
-    # No added capabilities: nmap runs unprivileged, so only scans without raw
-    # sockets work (TCP connect -sT, version detection -sV; not -sS or -O).

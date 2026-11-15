@@ -54,9 +54,8 @@ def test_edit(operator, db):
 
 def test_delete_removes_history(operator, db):
     target_id = add_target(db, "network", "203.0.113.0/30")
-    db.execute("INSERT INTO jobs (target_id, created_by_user_id, scanner, params_fingerprint, "
-               "status, queued_at, finished_at) VALUES (?, 1, 'nmap', ?, 'completed', ?, ?)",
-               (target_id, "f" * 64, LONG_AGO, LONG_AGO))
+    db.execute("INSERT INTO jobs (target_id, created_by_user_id, scanner, status, queued_at, "
+               "finished_at) VALUES (?, 1, 'shodan', 'completed', ?, ?)", (target_id, LONG_AGO, LONG_AGO))
     post(operator, f"/targets/{target_id}/delete")
     assert db.execute("SELECT count(*) FROM targets").fetchone()[0] == 0
     assert db.execute("SELECT count(*) FROM jobs").fetchone()[0] == 0
@@ -66,9 +65,8 @@ def test_delete_removes_artifact_files(app, operator, db):
     """The rows go through ON DELETE CASCADE; the files are removed by delete_target."""
     target_id = add_target(db, "network", "203.0.113.0/30")
     job_id = db.execute("INSERT INTO jobs (target_id, created_by_user_id, scanner, "
-                        "params_fingerprint, status, queued_at, finished_at) "
-                        "VALUES (?, 1, 'shodan', ?, 'completed', ?, ?)",
-                        (target_id, "f" * 64, LONG_AGO, LONG_AGO)).lastrowid
+                        "status, queued_at, finished_at) VALUES (?, 1, 'shodan', 'completed', ?, ?)",
+                        (target_id, LONG_AGO, LONG_AGO)).lastrowid
     folder = Path(app.config["DATABASE"]).parent / "artifacts" / str(job_id)
     folder.mkdir(parents=True)
     (folder / "shodan.json").write_text("{}")

@@ -23,9 +23,6 @@ docker compose up -d --build
 docker compose logs asma # temporary password of "admin" on a fresh start with an empty /data folder (the check is on the PRAGMA user_version)
 # if a long time has passed on a server and security updates have been added, then set it up without cache:
 docker compose build --pull --no-cache && docker compose up -d
-
-# to check whether binaries successfully installed:
-docker compose exec asma sh -c 'nmap --version | head -1; command -v puredns massdns'
 ```
 
 Open http://127.0.0.1:8000, sign in as `admin` with the temporary password and set a new one.

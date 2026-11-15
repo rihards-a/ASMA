@@ -85,8 +85,7 @@ def compare(conn, job_id):
       changed  the baseline's version of findings whose details differ now
     """
     row = conn.execute(
-        "SELECT b.job_id FROM jobs AS j JOIN jobs AS b ON b.target_id = j.target_id "
-        "AND b.scanner = j.scanner AND b.params_fingerprint = j.params_fingerprint "
+        "SELECT b.job_id FROM jobs AS j JOIN jobs AS b ON b.target_id = j.target_id AND b.scanner = j.scanner "
         "WHERE j.job_id = ? AND j.status = 'completed' AND b.status = 'completed' "
         "AND b.job_id < j.job_id ORDER BY b.job_id DESC LIMIT 1", (job_id,)).fetchone()
     if not row:
@@ -144,19 +143,15 @@ def queue_job(app, conn, target, name, user_id=None, schedule_id=None):
     scanner = SCANNERS[name]
     if not app.config[scanner.API_KEY]:
         raise validation.InputError(f"The {name} scanner has no API key; set ASMA_{scanner.API_KEY}.")
-    # No scanner takes options yet, so all jobs have the same params.
-    params = "{}"
-    fingerprint = hashlib.sha256(params.encode()).hexdigest()
-    if conn.execute("SELECT 1 FROM jobs WHERE target_id = ? AND scanner = ? AND params_fingerprint = ? "
-                    "AND status IN ('queued', 'running')",
-                    (target["target_id"], name, fingerprint)).fetchone():
+    
+    if conn.execute("SELECT 1 FROM jobs WHERE target_id = ? AND scanner = ? "
+                    "AND status IN ('queued', 'running')", (target["target_id"], name)).fetchone():
         raise validation.InputError(f"A {name} scan of {target['value']} is already queued or "
-                                    f"running with the same parameters.", 409)
+                                    f"running.", 409)
 
     job_id = conn.execute(
-        "INSERT INTO jobs (target_id, schedule_id, created_by_user_id, scanner, params, "
-        "params_fingerprint, queued_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (target["target_id"], schedule_id, user_id, name, params, fingerprint, now())).lastrowid
+        "INSERT INTO jobs (target_id, schedule_id, created_by_user_id, scanner, queued_at) "
+        "VALUES (?, ?, ?, ?, ?)", (target["target_id"], schedule_id, user_id, name, now())).lastrowid
     audit("job.create", details={"job_id": job_id, "scanner": name, "target_id": target["target_id"],
                                  "value": target["value"], "schedule_id": schedule_id}, conn=conn)
     conn.commit()
@@ -248,9 +243,9 @@ def complete(app, conn, job_id, name, findings, raw):
         conn.rollback()
         path.unlink(missing_ok=True)
         return
-    conn.executemany("INSERT INTO findings (job_id, scanner, finding_key, details) "
-                     "VALUES (?, ?, ?, ?)",
-                     [(job_id, name, key, details_json(details))
+    conn.executemany("INSERT INTO findings (job_id, finding_key, details) "
+                     "VALUES (?, ?, ?)",
+                     [(job_id, key, details_json(details))
                       for key, details in findings.items()])
     baseline_id, changes = compare(conn, job_id)
     if baseline_id:
@@ -347,11 +342,6 @@ def download(job_id, artifact_id):
 # REST API (JSON, X-API-Key)
 # ---------------------------------------------------------------------------
 
-def job_json(job):
-    """A job as the API returns it: params as an object instead of text."""
-    return {**job, "params": json.loads(job["params"])}
-
-
 def finding_json(finding):
     """A finding as the API returns it: details as an object instead of text."""
     return {"finding_key": finding["finding_key"], "details": json.loads(finding["details"])}
@@ -360,14 +350,14 @@ def finding_json(finding):
 @api.route("/jobs")
 @api_key_required()
 def api_search():
-    return jsonify([job_json(j) for j in list_jobs(request.args.get("target_id", type=int))])
+    return jsonify([dict(j) for j in list_jobs(request.args.get("target_id", type=int))])
 
 
 @api.route("/jobs", methods=["POST"])
 @api_key_required(write=True)
 def api_create():
     job_id = create_job(validation.json_object(request.get_json(silent=True)))
-    return jsonify(job_json(get_job(job_id))), 201
+    return jsonify(dict(get_job(job_id))), 201
 
 
 @api.route("/jobs/<int:job_id>")
@@ -376,7 +366,7 @@ def api_view(job_id):
     """The job with its findings and, when it has a baseline, the diff: the keys
     of added findings and the removed and changed findings."""
     job = get_job(job_id) or abort(404, "Job not found.")
-    result = {**job_json(job), "findings": [finding_json(f) for f in get_findings(job_id)], "diff": None}
+    result = {**job, "findings": [finding_json(f) for f in get_findings(job_id)], "diff": None}
     baseline_id, changes = compare(get_db(), job_id)
     if baseline_id:
         result["diff"] = {"baseline_job_id": baseline_id, "added": list(changes["added"]),
@@ -389,4 +379,4 @@ def api_view(job_id):
 @api_key_required(write=True)
 def api_cancel(job_id):
     cancel_job(get_job(job_id) or abort(404, "Job not found."))
-    return jsonify(job_json(get_job(job_id)))
+    return jsonify(dict(get_job(job_id)))

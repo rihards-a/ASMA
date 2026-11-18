@@ -273,6 +273,19 @@ def error_text(name, exc):
     return "Unexpected error; see the application log."
 
 
+def send_artifact(job_id, artifact_id):
+    """Send one artifact of a job and audit the download. 
+    Shared by the web page and the API."""
+    db = get_db()
+    artifact = db.execute("SELECT * FROM artifacts WHERE artifact_id = ? AND job_id = ?",
+                          (artifact_id, job_id)).fetchone() or abort(404)
+    audit("artifact.download", details={"job_id": job_id, "artifact_id": artifact_id,
+                                        "name": artifact["name"]})
+    db.commit()
+    return send_from_directory(Path(current_app.config["DATABASE"]).parent.resolve(), artifact["rel_path"],
+                               mimetype=artifact["media_type"], as_attachment=True,
+                               download_name=f"job-{job_id}-{artifact['name']}")
+
 # ---------------------------------------------------------------------------
 # Web pages
 # ---------------------------------------------------------------------------
@@ -326,16 +339,7 @@ def cancel(job_id):
 @bp.route("/jobs/<int:job_id>/artifacts/<int:artifact_id>")
 @login_required
 def download(job_id, artifact_id):
-    db = get_db()
-    artifact = db.execute("SELECT * FROM artifacts WHERE artifact_id = ? AND job_id = ?",
-                          (artifact_id, job_id)).fetchone() or abort(404)
-    audit("artifact.download", details={"job_id": job_id, "artifact_id": artifact_id,
-                                        "name": artifact["name"]})
-    db.commit()
-    # send_from_directory refuses paths that leave the data directory.
-    return send_from_directory(Path(current_app.config["DATABASE"]).parent, artifact["rel_path"],
-                               mimetype=artifact["media_type"], as_attachment=True,
-                               download_name=f"job-{job_id}-{artifact['name']}")
+    return send_artifact(job_id, artifact_id)
 
 
 # ---------------------------------------------------------------------------
@@ -363,10 +367,16 @@ def api_create():
 @api.route("/jobs/<int:job_id>")
 @api_key_required()
 def api_view(job_id):
-    """The job with its findings and, when it has a baseline, the diff: the keys
-    of added findings and the removed and changed findings."""
+    """The job with its findings, artifacts and, when it has a baseline, the diff: 
+    the keys of added findings and the removed and changed findings."""
     job = get_job(job_id) or abort(404, "Job not found.")
-    result = {**job, "findings": [finding_json(f) for f in get_findings(job_id)], "diff": None}
+    artifacts = [{"artifact_id": a["artifact_id"], "name": a["name"]} for a in get_db().execute(
+        "SELECT artifact_id, name FROM artifacts WHERE job_id = ? ORDER BY name", (job_id,))]
+    result = {**job, 
+        "findings": [finding_json(f) for f in get_findings(job_id)], 
+        "diff": None, 
+        "artifacts": artifacts
+    }
     baseline_id, changes = compare(get_db(), job_id)
     if baseline_id:
         result["diff"] = {"baseline_job_id": baseline_id, "added": list(changes["added"]),
@@ -380,3 +390,9 @@ def api_view(job_id):
 def api_cancel(job_id):
     cancel_job(get_job(job_id) or abort(404, "Job not found."))
     return jsonify(dict(get_job(job_id)))
+
+
+@api.route("/jobs/<int:job_id>/artifacts/<int:artifact_id>")
+@api_key_required()
+def download(job_id, artifact_id):
+    return send_artifact(job_id, artifact_id)
